@@ -58,6 +58,15 @@ class JCR:
         return probs
 
     def evaluate_rewards_elementwise(self, i, j, action, is_parking_fee=False, free_one_to_two=False):
+        """
+        computes expected reward after taking action `action` from state [i, j]
+        :param i: amount of cars in first location
+        :param j: amount of cars in second location
+        :param action: how many cars to move from first to second location
+        :param is_parking_fee: does Jack pay 4$ if >10 cars are spending the night on location
+        :param free_one_to_two: can one car be moved for free from first to second location
+        :return:
+        """
         cars_to_move = max(min(i, action), -j)
         a = min(i - cars_to_move, MAX_CARS)
         b = min(j + cars_to_move, MAX_CARS)
