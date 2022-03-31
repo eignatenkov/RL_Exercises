@@ -30,14 +30,8 @@ class JCR:
         self.policy = np.zeros((MAX_CARS + 1, MAX_CARS + 1), dtype=int)
         self.reward_cars_left_probs_one = self.fill_reward_cars_left_probs(self.req_probs_one, self.ret_probs_one)
         self.reward_cars_left_probs_two = self.fill_reward_cars_left_probs(self.req_probs_two, self.ret_probs_two)
-        self.reward_array = self.make_reward_array()
         self.is_parking_fee = is_parking_fee
         self.free_one_to_two = free_one_to_two
-
-    @staticmethod
-    def make_reward_array():
-        return np.flipud(np.array([np.diag(np.ones(MAX_CARS + 1 - abs(i)) * (i + MAX_CARS) * RENTAL_REWARD, i) for i in
-                                   range(-MAX_CARS, MAX_CARS + 1)]).sum(axis=0))
 
     @staticmethod
     def _cars_left(cars_before, taken_prob, returned_prob):
@@ -119,8 +113,6 @@ class JCR:
             self.evaluate_policy(theta=theta)
             done = self.improve_policy()
             counter += 1
-            print(counter)
-            print(self.policy)
             if done:
                 print(counter)
                 return
@@ -129,5 +121,3 @@ class JCR:
 if __name__ == "__main__":
     jcr = JCR(is_parking_fee=False, free_one_to_two=False)
     jcr.find_best_policy()
-    # print(jcr.policy)
-    # print(jcr.values)
