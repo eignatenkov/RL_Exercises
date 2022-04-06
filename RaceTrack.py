@@ -75,7 +75,7 @@ class RaceTrack:
         :return:
         """
         new_speed = np.zeros(2)
-        while new_speed == np.zeros(2) or np.any(new_speed < 0):
+        while new_speed == np.zeros(2) or np.any(new_speed < 0) or np.any(new_speed > 5):
             action = self.sample_index(policy[state])
             new_speed = state[2:] + action - 1
         new_position = state[:2] + new_speed
