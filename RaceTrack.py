@@ -27,9 +27,10 @@ class RaceTrack:
         # policy is action value per state, so it needs to be decided how to store chosen actions.
         # Put ones in action array?
         # action-value function
-        self.q = np.zeros((*self.field.shape, 5, 5, 3, 3))
+        self.q = np.random.uniform(-100, -50, size=(*self.field.shape, 5, 5, 3, 3))
         # cumulative sum of weights of returns
         self.c = np.zeros((*self.field.shape, 5, 5, 3, 3))
+        # TODO fix initialization of self.policy based on self.q
         self.policy = np.zeros((*self.field.shape, 5, 5, 3, 3))
         self.policy[:, :, :, :, 1, 1] = 1
         self.random_policy = np.ones((*self.field.shape, 5, 5, 3, 3)) / 9
@@ -47,7 +48,7 @@ class RaceTrack:
         :param finish: [c, d]
         :return: list of cells/indices that this segment crosses
         """
-        return np.unique(i.astype(int) for i in np.linspace(start, finish, 1000))
+        return np.unique([i.astype(int) for i in np.linspace(start + 0.5, finish + 0.5, 1000)], axis=0)
 
     def check_boundary_cross(self, start, finish):
         """
@@ -58,7 +59,7 @@ class RaceTrack:
         crossed_cells = self.find_all_crossed_cells(start, finish)
         prev_cell = crossed_cells[0]
         for cc in crossed_cells[1:]:
-            if cc[0] >= self.field.shape[0] or cc[1] >= self.field.shape[1] or self.field[cc] == 0:
+            if cc[0] >= self.field.shape[0] or cc[1] >= self.field.shape[1] or self.field[tuple(cc)] == 0:
                 if prev_cell[1] == self.finish_line:
                     return 2
                 else:
@@ -75,43 +76,48 @@ class RaceTrack:
         :return:
         """
         new_speed = np.zeros(2)
-        while new_speed == np.zeros(2) or np.any(new_speed < 0) or np.any(new_speed > 5):
-            action = self.sample_index(policy[state])
+        while not np.any(new_speed) or np.any(new_speed < 0) or np.any(new_speed >= 5):
+            action = self.sample_index(policy[tuple(state)])
             new_speed = state[2:] + action - 1
         new_position = state[:2] + new_speed
         crossed_boundary = self.check_boundary_cross(state[:2], new_position)
         if crossed_boundary == 0:
             return action, np.concatenate([new_position, new_speed])
         elif crossed_boundary == 1:
-            return action, np.array([np.random.choice(np.arange(3,9)), 31, 0, 0])
+            return action, np.array([0, np.random.choice(np.arange(3, 9)), 0, 0])
         elif crossed_boundary == 2:
             return action, "finished"
 
     def generate_episode(self, start, policy):
         actions = []
         cur_start = start
-        cur_state = np.array(*cur_start, [0, 0])
+        cur_state = np.array([*cur_start, 0, 0])
         states = [cur_state]
         proceed = True
         while proceed:
             action, state = self.make_move(cur_state, policy)
             actions.append(action)
             if state == "finished":
-                return actions, states
+                return states, actions
             states.append(state)
             cur_state = state
 
     def policy_update_iteration(self):
         states, actions = self.generate_episode(random.choice(np.argwhere(self.field == 1)), self.random_policy)
+        print("n states of the episode", len(states))
         g = 0
         w = 1
         for i in range(len(states) - 1, -1, -1):
             g = self.gamma*g - 1
-            self.c[*states[i], *actions[i]] += w
-            self.q[*states[i], *actions[i]] += w/self.c[*states[i], *actions[i]] * (g - self.q[*states[i], *actions[i]])
-            self.policy[*states[i],] = 0
-            self.policy[*states[i], *np.argmax(self.q[states[i]])] = 1
-            if np.argmax(self.q[states[i]]) != actions:
+            states_index = tuple(states[i])
+            full_index = tuple(states[i]) + tuple(actions[i])
+            self.c[full_index] += w
+            self.q[full_index] += w/self.c[full_index] * (g - self.q[full_index])
+            self.policy[states_index] = 0
+            best_q = np.unravel_index(np.argmax(self.q[states_index]), self.q[states_index].shape)
+            self.policy[states_index + best_q] = 1
+            if best_q != tuple(actions[i]):
+                print(len(states) - i)
                 return
             w /= 1/9
 
@@ -122,5 +128,6 @@ class RaceTrack:
 
 if __name__ == "__main__":
     t = RaceTrack()
-    t.policy_update()
-    print(t.generate_episode([0, 2], t.policy))
+    t.policy_update(n_iter=30)
+    states, actions = t.generate_episode([0, 6], t.policy)
+    print(states)
