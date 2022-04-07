@@ -1,5 +1,6 @@
 import numpy as np
 import random
+from tqdm import trange
 
 
 class RaceTrack:
@@ -27,14 +28,36 @@ class RaceTrack:
         # policy is action value per state, so it needs to be decided how to store chosen actions.
         # Put ones in action array?
         # action-value function
-        self.q = np.random.uniform(-100, -50, size=(*self.field.shape, 5, 5, 3, 3))
+        self.q = -100 * np.ones((*self.field.shape, 5, 5, 3, 3))
         # cumulative sum of weights of returns
         self.c = np.zeros((*self.field.shape, 5, 5, 3, 3))
-        # TODO fix initialization of self.policy based on self.q
-        self.policy = np.zeros((*self.field.shape, 5, 5, 3, 3))
-        self.policy[:, :, :, :, 1, 1] = 1
-        self.random_policy = np.ones((*self.field.shape, 5, 5, 3, 3)) / 9
+        self.speed_action_hypercube = self.create_speed_action_hypercube()
+        self.policy = np.tile(self.speed_action_hypercube, (*self.field.shape, 1, 1, 1, 1))
+        self.random_policy = np.tile(self.speed_action_hypercube, (*self.field.shape, 1, 1, 1, 1))
         self.gamma = gamma
+
+    @staticmethod
+    def create_speed_action_hypercube():
+        """needs to have 0 probability of making illegal update of speed components. It's independent of the
+        location, only based on current speed
+        """
+        speed_action_hypercube = np.ones((5, 5, 3, 3))
+        speed_action_hypercube[0, :, 0, :] = 0
+        speed_action_hypercube[4, :, 2, :] = 0
+        speed_action_hypercube[:, 0, :, 0] = 0
+        speed_action_hypercube[:, 4, :, 2] = 0
+        speed_action_hypercube[0, 0, 1, 1] = 0
+        speed_action_hypercube[1, 1, 0, 0] = 0
+        speed_action_hypercube[1, 0, 0, 1] = 0
+        speed_action_hypercube[0, 1, 1, 0] = 0
+        for i in range(5):
+            for j in range(5):
+                speed_action_hypercube[i, j] /= speed_action_hypercube[i, j].sum()
+        return speed_action_hypercube
+
+    def create_epsilon_policy(self, policy, epsilon=0.1):
+        eps_policy = np.tile(self.speed_action_hypercube, (*self.field.shape, 1, 1, 1, 1)) * epsilon
+        return policy * (1 - epsilon) + eps_policy
 
     @staticmethod
     def sample_index(p):
@@ -75,10 +98,12 @@ class RaceTrack:
         :param policy:
         :return:
         """
-        new_speed = np.zeros(2)
-        while not np.any(new_speed) or np.any(new_speed < 0) or np.any(new_speed >= 5):
-            action = self.sample_index(policy[tuple(state)])
-            new_speed = state[2:] + action - 1
+        action = self.sample_index(policy[tuple(state)])
+        new_speed = state[2:] + action - 1
+        if not np.any(new_speed) or np.any(new_speed < 0) or np.any(new_speed >= 5):
+            print("policy", policy[tuple(state)])
+            raise Exception(f"Bad new speed {new_speed} created from state {state} and action {action}")
+
         new_position = state[:2] + new_speed
         crossed_boundary = self.check_boundary_cross(state[:2], new_position)
         if crossed_boundary == 0:
@@ -86,7 +111,7 @@ class RaceTrack:
         elif crossed_boundary == 1:
             return action, np.array([0, np.random.choice(np.arange(3, 9)), 0, 0])
         elif crossed_boundary == 2:
-            return action, "finished"
+            return action, np.array([])
 
     def generate_episode(self, start, policy):
         actions = []
@@ -97,29 +122,29 @@ class RaceTrack:
         while proceed:
             action, state = self.make_move(cur_state, policy)
             actions.append(action)
-            if state == "finished":
+            if state.size == 0:
                 return states, actions
             states.append(state)
             cur_state = state
 
     def policy_update_iteration(self):
-        states, actions = self.generate_episode(random.choice(np.argwhere(self.field == 1)), self.random_policy)
-        print("n states of the episode", len(states))
+        # s, a = self.generate_episode(random.choice(np.argwhere(self.field == 1)), self.random_policy)
+        s, a = self.generate_episode((0, random.randint(3,9)), self.random_policy)
         g = 0
         w = 1
-        for i in range(len(states) - 1, -1, -1):
+        for i in range(len(s) - 1, -1, -1):
             g = self.gamma*g - 1
-            states_index = tuple(states[i])
-            full_index = tuple(states[i]) + tuple(actions[i])
+            states_index = tuple(s[i])
+            full_index = tuple(s[i]) + tuple(a[i])
             self.c[full_index] += w
             self.q[full_index] += w/self.c[full_index] * (g - self.q[full_index])
             self.policy[states_index] = 0
             best_q = np.unravel_index(np.argmax(self.q[states_index]), self.q[states_index].shape)
             self.policy[states_index + best_q] = 1
-            if best_q != tuple(actions[i]):
-                print(len(states) - i)
-                return
-            w /= 1/9
+            if best_q != tuple(a[i]):
+                break
+            w /= self.random_policy[full_index]
+        self.random_policy = self.create_epsilon_policy(self.policy, epsilon=0.2)
 
     def policy_update(self, n_iter=1000):
         for i in range(n_iter):
@@ -127,7 +152,11 @@ class RaceTrack:
 
 
 if __name__ == "__main__":
-    t = RaceTrack()
-    t.policy_update(n_iter=30)
-    states, actions = t.generate_episode([0, 6], t.policy)
-    print(states)
+    t = RaceTrack(gamma=0.9)
+    for i in range(30):
+        t.policy_update(n_iter=100)
+        states, actions = t.generate_episode([0, 8], t.policy)
+        print(len(actions))
+        print(t.policy[0, 8, 0, 0])
+        print(t.policy[1, 8, 1, 0])
+    print(states, actions[-1])
