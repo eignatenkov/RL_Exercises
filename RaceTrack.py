@@ -19,9 +19,20 @@ class RaceTrack:
             self.field[22:29, 2:9] = 1
             self.field[29:, 3:9] = 1
             self.field = np.flipud(self.field)
-            self.finish_line = 16
         else:
-            raise Exception('not supported')
+            self.field = np.zeros((30, 32), dtype=int)
+            self.field[:3, :23] = 1
+            for i in range(3, 17):
+                self.field[i, i - 2:23] = 1
+            self.field[21:, 16:] = 1
+            self.field[17, 14:24] = 1
+            self.field[18, 14:26] = 1
+            self.field[19, 14:27] = 1
+            self.field[20, 14:30] = 1
+            self.field[21:-1, 13:16] = 1
+            self.field[22:-2, 12] = 1
+            self.field[23:-3, 11] = 1
+        self.finish_line = self.field.shape[1] - 1
 
         # state is position on the field and current speed, so, to encode states, you need four dimensions.
         # action is changing velocity components by +1, 0, -1 each, so, another two dimensions?
@@ -35,6 +46,19 @@ class RaceTrack:
         self.policy = np.tile(self.speed_action_hypercube, (*self.field.shape, 1, 1, 1, 1))
         self.random_policy = np.tile(self.speed_action_hypercube, (*self.field.shape, 1, 1, 1, 1))
         self.gamma = gamma
+
+    def print_field(self, trajectory=None):
+        list_trajectory = None
+        if trajectory:
+            list_trajectory = [list(el[:2]) for el in trajectory]
+        for i in range(self.field.shape[0] - 1, -1, -1):
+            row = ''
+            for j in range(self.field.shape[1]):
+                if list_trajectory and [i, j] in list_trajectory:
+                    row += 'X'
+                else:
+                    row += '0' if self.field[i,j] == 1 else ' '
+            print(row)
 
     @staticmethod
     def create_speed_action_hypercube():
@@ -90,7 +114,7 @@ class RaceTrack:
             prev_cell = cc
         return 0
 
-    def make_move(self, state, policy):
+    def make_move(self, state, policy, old_speed_prob=0.):
         """
         given current state (location and speed), applies given policy, returns new state (location and speed) or the
         fact that the car has crossed the finish line. No need to return reward, it's -1 for every turn
@@ -99,7 +123,10 @@ class RaceTrack:
         :return:
         """
         action = self.sample_index(policy[tuple(state)])
-        new_speed = state[2:] + action - 1
+        if np.any(state[2:0] != 0) and np.random.uniform() < old_speed_prob:
+            new_speed = state[2:]
+        else:
+            new_speed = state[2:] + action - 1
         if not np.any(new_speed) or np.any(new_speed < 0) or np.any(new_speed >= 5):
             print("policy", policy[tuple(state)])
             raise Exception(f"Bad new speed {new_speed} created from state {state} and action {action}")
@@ -113,23 +140,23 @@ class RaceTrack:
         elif crossed_boundary == 2:
             return action, np.array([])
 
-    def generate_episode(self, start, policy):
+    def generate_episode(self, start_state, policy, old_seen_prob=0.):
         actions = []
-        cur_start = start
-        cur_state = np.array([*cur_start, 0, 0])
+        cur_state = start_state
         states = [cur_state]
         proceed = True
         while proceed:
-            action, state = self.make_move(cur_state, policy)
+            action, state = self.make_move(cur_state, policy, old_speed_prob=old_seen_prob)
             actions.append(action)
             if state.size == 0:
                 return states, actions
             states.append(state)
             cur_state = state
 
-    def policy_update_iteration(self):
-        # s, a = self.generate_episode(random.choice(np.argwhere(self.field == 1)), self.random_policy)
-        s, a = self.generate_episode((0, random.randint(3,9)), self.random_policy)
+    def policy_update_iteration(self, old_seen_prob=0.):
+        random_start_state = np.array((*random.choice(np.argwhere(self.field == 1)), random.randint(0, 4), random.randint(0, 4)))
+        # random_start_state = np.array((0, random.randint(3, 9), 0, 0))
+        s, a = self.generate_episode(random_start_state, self.random_policy, old_seen_prob=old_seen_prob)
         g = 0
         w = 1
         for i in range(len(s) - 1, -1, -1):
@@ -144,19 +171,23 @@ class RaceTrack:
             if best_q != tuple(a[i]):
                 break
             w /= self.random_policy[full_index]
-        self.random_policy = self.create_epsilon_policy(self.policy, epsilon=0.2)
+        self.random_policy = self.create_epsilon_policy(self.policy, epsilon=0.3)
 
-    def policy_update(self, n_iter=1000):
+    def policy_update(self, n_iter=1000, old_seen_prob=0.):
         for i in range(n_iter):
-            self.policy_update_iteration()
+            self.policy_update_iteration(old_seen_prob=old_seen_prob)
 
 
 if __name__ == "__main__":
-    t = RaceTrack(gamma=0.9)
-    for i in range(30):
-        t.policy_update(n_iter=100)
-        states, actions = t.generate_episode([0, 8], t.policy)
+    t = RaceTrack(simple=True, gamma=0.9)
+    # t.print_field()
+    # t.print_field([[0,8], [1,9]])
+    for i in range(20):
+        t.policy_update(n_iter=200, old_seen_prob=0.1)
+        states, actions = t.generate_episode(np.array([0, 0, 0, 0]), t.policy)
         print(len(actions))
-        print(t.policy[0, 8, 0, 0])
-        print(t.policy[1, 8, 1, 0])
+        # print(states)
+        # t.print_field(states)
+        # print(t.q[0, 0, 0, 0, 1:, 1:])
+        # print(t.q[1, 1, 1, 1, 1:, 1:])
     print(states, actions[-1])
